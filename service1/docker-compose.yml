@@ -33,12 +33,25 @@ services:
     container_name: ai-service
     depends_on:
       - rabbitmq
+      - ollama
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3
     ports:
       - "8001:8000"
+    networks:
+      - med-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
     networks:
       - med-net
 
@@ -72,3 +85,7 @@ networks:
   med-net:
     name: med-net
     driver: bridge
+
+volumes:
+  ollama_data:
+    name: ollama_data

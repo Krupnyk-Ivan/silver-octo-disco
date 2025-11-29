@@ -24,6 +24,19 @@
       "UpstreamPathTemplate": "/tactical/quiz/submit",
       "UpstreamHttpMethod": [ "POST" ]
     }
+    ,
+    {
+      "DownstreamPathTemplate": "/api/quiz/{id}/review",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "quiz-service",
+          "Port": 80
+        }
+      ],
+      "UpstreamPathTemplate": "/tactical/quiz/{id}/review",
+      "UpstreamHttpMethod": [ "POST" ]
+    }
   ],
   "GlobalConfiguration": {
     "RequestIdKey": "RequestId"

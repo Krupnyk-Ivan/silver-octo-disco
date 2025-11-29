@@ -10,5 +10,9 @@ namespace QuizService.Models
         public string Question { get; set; } = default!;
         public string AnswerText { get; set; } = default!;
         public string Status { get; set; } = "Pending";
+        // Score set by AI review service (nullable until reviewed)
+        public int? Score { get; set; }
+        // Optional textual feedback produced by AI reviewer
+        public string? Feedback { get; set; }
     }
 }

@@ -51,10 +51,23 @@
         </div>
 
         <div class="col-md-5">
-          <div class="card">
+          <div class="card mb-3">
             <div class="card-body">
               <h5 class="card-title">Result</h5>
               <pre id="resultArea" style="white-space:pre-wrap;word-break:break-word;">No results yet.</pre>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body">
+              <h5 class="card-title">AI Review</h5>
+              <div id="aiReview">
+                <div><strong>Status:</strong> <span id="aiStatus">-</span></div>
+                <div><strong>Score:</strong> <span id="aiScore">-</span></div>
+                <div class="mt-2"><strong>Feedback:</strong>
+                  <div id="aiFeedback" style="white-space:pre-wrap;word-break:break-word;">-</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -92,6 +105,9 @@
           if (data && data.id) {
             document.getElementById('lookupId').value = data.id;
           }
+          // clear any previous AI review
+          document.getElementById('aiStatus').textContent = '-';
+          document.getElementById('aiScore').textContent = '-';
         } catch (err) {
           statusEl.textContent = 'Network error';
           document.getElementById('resultArea').textContent = String(err);
@@ -104,10 +120,24 @@
         document.getElementById('resultArea').textContent = 'Looking up...';
         try {
           const r = await fetch(`/api/get/${encodeURIComponent(id)}`);
-          const text = await r.text();
-          document.getElementById('resultArea').textContent = text;
+            if (r.status === 200) {
+            const data = await r.json();
+            document.getElementById('resultArea').textContent = JSON.stringify(data, null, 2);
+            // Show AI review fields if present
+            document.getElementById('aiStatus').textContent = data.status || '-';
+            document.getElementById('aiScore').textContent = (data.score !== undefined && data.score !== null) ? String(data.score) : '-';
+            document.getElementById('aiFeedback').textContent = data.feedback || data.feedbackText || data.Feedback || '-';
+          } else {
+            const text = await r.text();
+            document.getElementById('resultArea').textContent = text;
+            document.getElementById('aiStatus').textContent = '-';
+            document.getElementById('aiScore').textContent = '-';
+            document.getElementById('aiFeedback').textContent = '-';
+          }
         } catch (err) {
           document.getElementById('resultArea').textContent = String(err);
+          document.getElementById('aiStatus').textContent = '-';
+          document.getElementById('aiScore').textContent = '-';
         }
       });
     </script>

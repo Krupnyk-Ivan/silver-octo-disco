@@ -71,5 +71,26 @@ namespace QuizService.Controllers
             if (s == null) return NotFound();
             return Ok(s);
         }
+
+        public class ReviewDto
+        {
+            public int Score { get; set; }
+            public string? Status { get; set; }
+            public string? Feedback { get; set; }
+        }
+
+        [HttpPost("{id:guid}/review")]
+        public async Task<IActionResult> Review(Guid id, [FromBody] ReviewDto dto)
+        {
+            var s = await _db.QuizSubmissions.FirstOrDefaultAsync(x => x.Id == id);
+            if (s == null) return NotFound();
+
+            s.Score = dto.Score;
+            if (!string.IsNullOrEmpty(dto.Status)) s.Status = dto.Status;
+            if (!string.IsNullOrEmpty(dto.Feedback)) s.Feedback = dto.Feedback;
+
+            await _db.SaveChangesAsync();
+            return Ok(s);
+        }
     }
 }

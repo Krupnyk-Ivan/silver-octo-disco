@@ -51,6 +51,8 @@ async def api_get(submission_id: str):
     async with httpx.AsyncClient() as client:
         url = f"{GATEWAY}/tactical/quiz/{submission_id}"
         resp = await client.get(url, timeout=10.0)
-    if resp.status_code == 200:
-        return HTMLResponse(content=resp.text)
-    raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"status_code": resp.status_code, "text": resp.text}
+    return JSONResponse(status_code=resp.status_code, content=data)
