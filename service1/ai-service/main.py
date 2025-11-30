@@ -3,6 +3,8 @@ import json
 import logging
 import asyncio
 import re
+import time
+import random
 
 import aio_pika
 import httpx
@@ -20,6 +22,10 @@ QUEUE_NAME = "ai_review_queue"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://api-gateway")
+
+# Set when the configured Ollama model is available via /api/models
+MODEL_READY = False
+LAST_MODEL_CHECK: float | None = None
 
 app = FastAPI(title="AIReviewService")
 
@@ -42,6 +48,8 @@ async def ask_llama(question: str, answer: str) -> tuple[int, str]:
     Returns (score:int, feedback:str).
     The prompt asks for JSON: {"score": <int>, "feedback": "short text"} but we tolerate other formats.
     """
+    if not MODEL_READY:
+        raise RuntimeError("Ollama model not ready")
     prompt = (
         "You are a medical instructor. Evaluate the student's answer to the question below and return a JSON object"
         " with two keys: \"score\" (an integer 0-100) and \"feedback\" (a short helpful sentence)."
@@ -167,8 +175,9 @@ async def start_consumer():
             logger.info("Connected to RabbitMQ (async), waiting for messages...")
             await queue.consume(process_message)
 
-            # keep running until connection drops
-            await connection.wait_closed()
+            # keep the consumer task running; aio-pika's RobustConnection will handle reconnects
+            # we use an indefinite wait so this coroutine stays alive while the connection is up
+            await asyncio.Event().wait()
         except Exception as ex:
             attempt += 1
             wait = min(30, (2 ** attempt))
@@ -192,9 +201,12 @@ async def startup_event():
                     full = f"{url_base}{ep}"
                     async with httpx.AsyncClient(timeout=5.0) as client:
                         r = await client.get(full)
-                        if r.status_code < 500:
-                            logging.info("Ollama responded at %s (status=%s)", full, r.status_code)
+                        # Treat only HTTP 200 as a positive readiness signal here.
+                        if r.status_code == 200:
+                            logging.info("Ollama responded OK at %s (status=%s)", full, r.status_code)
                             return True
+                        else:
+                            logging.debug("Ollama endpoint %s responded %s", full, r.status_code)
                 except Exception:
                     pass
             attempts += 1
@@ -208,6 +220,70 @@ async def startup_event():
             logging.warning("Ollama did not become ready within timeout; continuing and will fallback if needed.")
     except Exception as e:
         logging.warning("Error while waiting for Ollama readiness: %s", e)
+    # Start a background watcher that polls /api/models until the configured model appears
+    async def model_watcher():
+        global MODEL_READY, LAST_MODEL_CHECK
+        url = f"{OLLAMA_URL.rstrip('/')}/api/models"
+        attempt = 0
+        # Exponential backoff with jitter to avoid tight polling while large model downloads occur
+        while True:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    r = await client.get(url)
+                    LAST_MODEL_CHECK = time.time()
+                    status = r.status_code
+                    if status == 200:
+                        try:
+                            data = r.json()
+                        except Exception:
+                            data = None
+                        names = []
+                        if isinstance(data, list):
+                            for item in data:
+                                if isinstance(item, str):
+                                    names.append(item)
+                                elif isinstance(item, dict) and item.get("name"):
+                                    names.append(item.get("name"))
+                        elif isinstance(data, dict):
+                            for k in ("models", "results", "items"):
+                                lst = data.get(k)
+                                if isinstance(lst, list):
+                                    for it in lst:
+                                        if isinstance(it, str):
+                                            names.append(it)
+                                        elif isinstance(it, dict) and it.get("name"):
+                                            names.append(it.get("name"))
+                        if OLLAMA_MODEL in names:
+                            MODEL_READY = True
+                            logging.info("Ollama model %s is now available.", OLLAMA_MODEL)
+                            break
+                        else:
+                            logging.info("Ollama /api/models returned 200 but model %s not listed yet.", OLLAMA_MODEL)
+                    else:
+                        # 404 is expected while model is pulling/extracting; log debug to avoid noise
+                        if status == 404:
+                            logging.debug("Ollama /api/models returned 404 (model may be downloading)")
+                        else:
+                            logging.info("Ollama /api/models returned status %s", status)
+            except Exception as exc:
+                logging.info("Error querying Ollama /api/models: %s", exc)
+
+            attempt += 1
+            # backoff: base 5s, double each attempt up to 60s, add random jitter +/-20%
+            base = min(60, 5 * (2 ** (attempt - 1)))
+            jitter = base * 0.2
+            wait = max(5, base + random.uniform(-jitter, jitter))
+            logging.info("Model %s not yet available, retrying in %.1fs...", OLLAMA_MODEL, wait)
+            await asyncio.sleep(wait)
+
+    @app.get('/health')
+    async def health():
+        return {
+            'model_ready': MODEL_READY,
+            'last_model_check': LAST_MODEL_CHECK,
+        }
+
+    asyncio.create_task(model_watcher())
 
     # Start the async consumer in background
     asyncio.create_task(start_consumer())

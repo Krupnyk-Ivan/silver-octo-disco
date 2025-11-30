@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   rabbitmq:
     image: rabbitmq:3-management
@@ -34,12 +36,13 @@ services:
     depends_on:
       - rabbitmq
       - ollama
+      - ollama-init
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
       - OLLAMA_URL=http://ollama:11434
-      - OLLAMA_MODEL=llama3
+      - OLLAMA_MODEL=llama2-mini
     ports:
       - "8001:8000"
     networks:
@@ -54,6 +57,48 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - med-net
+
+  ollama-init:
+    image: alpine:3.18
+    container_name: ollama-init
+    depends_on:
+      - ollama
+    command: >
+      sh -c '
+        set -euo pipefail
+        apk add --no-cache curl jq >/dev/null 2>&1 || true
+        echo "Waiting for Ollama HTTP API..."
+        until curl -sSf http://ollama:11434/api/ping >/dev/null 2>&1; do
+          echo "Ollama not ready, sleeping 2s"
+          sleep 2
+        done
+        echo "Requesting model pull: llama2-mini"
+        curl -sSf -X POST http://ollama:11434/api/pull -H "Content-Type: application/json" -d '{"model":"llama2-mini"}' || true
+        echo "Pull requested, waiting for model registration..."
+        timeout=1200
+        interval=5
+        elapsed=0
+        while [ $elapsed -lt $timeout ]; do
+          if curl -sSf http://ollama:11434/api/models 2>/dev/null | jq -r '.[]? // .models[]? // empty' | grep -xq 'llama2-mini'; then
+            echo "Model llama2-mini is available"
+            break
+          fi
+          echo "Model not listed yet; sleeping $interval"
+          sleep $interval
+          elapsed=$((elapsed+interval))
+        done
+        echo "Model registration wait finished (or timed out)."
+        echo "Model disk usage (volume /root/.ollama):"
+        du -sh /root/.ollama || true
+        echo "Per-model sizes:"
+        du -sh /root/.ollama/* 2>/dev/null || true
+        exit 0
+      '
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - med-net
+    restart: 'no'
 
   api-gateway:
     build:
