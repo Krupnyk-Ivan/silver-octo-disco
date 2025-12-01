@@ -3,3 +3,10 @@ uvicorn[standard]==0.22.0
 # Use a compatible aio-pika release available on PyPI
 aio-pika==9.5.8
 httpx==0.24.1
+opentelemetry-api==1.19.0
+opentelemetry-sdk==1.19.0
+opentelemetry-exporter-otlp==1.19.0
+opentelemetry-exporter-otlp-proto-grpc==1.19.0
+# Instrumentation packages left unpinned to allow pip to resolve compatible versions
+opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-httpx

@@ -4,24 +4,22 @@ import logging
 import asyncio
 import re
 import time
-import random
-
 import aio_pika
 import httpx
 from fastapi import FastAPI
 
-# --- НАЛАШТУВАННЯ ЛОГУВАННЯ (КОНСОЛЬ + ФАЙЛ) ---
+# --- logging configuration ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler("ai_service.log", mode='a', encoding='utf-8'), # Запис у файл
-        logging.StreamHandler() # Вивід у консоль
+        logging.FileHandler("ai_service.log", mode='a', encoding='utf-8'),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger("ai-review")
-# ------------------------------------------------
 
+# runtime configuration
 RABBIT_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
 RABBIT_USER = os.getenv("RABBITMQ_USER", "guest")
 RABBIT_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
@@ -34,6 +32,34 @@ GATEWAY_URL = os.getenv("GATEWAY_URL", "http://api-gateway")
 
 MODEL_READY = False
 LAST_MODEL_CHECK: float | None = None
+
+# --- OpenTelemetry init (optional, safe if libs missing) ---
+try:
+    from opentelemetry import trace, propagate
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+    _otel_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4317")
+    _service_name = os.getenv("OTEL_SERVICE_NAME", "ai-service")
+
+    resource = Resource.create({"service.name": _service_name})
+    provider = TracerProvider(resource=resource)
+    otlp_exporter = OTLPSpanExporter(endpoint=_otel_endpoint, insecure=True)
+    provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+    trace.set_tracer_provider(provider)
+
+    # Instrumentations (FastAPI app object will be instrumented on startup)
+    HTTPXClientInstrumentor().instrument()
+    _otel_enabled = True
+except Exception as _e:
+    _otel_enabled = False
+    # safe fallback: continue without telemetry
+    logger.info(f"OpenTelemetry not initialized: {_e}")
+# ---------------------------------------------------------
 
 app = FastAPI(title="AIReviewService")
 
@@ -134,8 +160,50 @@ async def process_message(message: aio_pika.IncomingMessage):
         submission_id = payload.get("Id") or payload.get("id")
         question = payload.get("Question") or payload.get("question") or ""
 
-        logger.info(f"Received submission {submission_id}. Asking AI...")
+        # Extract trace context from message headers (if present)
+        try:
+            if _otel_enabled:
+                tracer = trace.get_tracer(__name__)
+                headers = {}
+                try:
+                    headers = dict(message.headers or {})
+                except Exception:
+                    headers = {}
 
+                def _getter(carrier, key):
+                    return carrier.get(key)
+
+                ctx = propagate.extract(_getter, headers)
+                with tracer.start_as_current_span("ai.process_message", context=ctx) as span:
+                    span.set_attribute("messaging.system", "rabbitmq")
+                    span.set_attribute("messaging.destination", EXCHANGE)
+                    span.set_attribute("messaging.rabbitmq.routing_key", ROUTING_KEY)
+                    span.set_attribute("messaging.message_id", str(submission_id))
+                    logger.info(f"Received submission {submission_id}. Asking AI...")
+
+                    try:
+                        score, feedback = await ask_llama(question, answer_text)
+                    except Exception as e:
+                        logger.warning(f"Ollama failed, using keywords. Error: {e}")
+                        score = keyword_score(answer_text)
+                        feedback = "AI unavailable, checked keywords."
+
+                    logger.info(f"AI Result: Score={score} Feedback='{feedback}'")
+
+                    if submission_id:
+                        try:
+                            review_url = f"{GATEWAY_URL.rstrip('/')}/tactical/quiz/{submission_id}/review"
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                await client.post(review_url, json={"Score": score, "Status": "Reviewed", "Feedback": feedback})
+                        except Exception as e:
+                            logger.warning(f"Failed to push review to Gateway: {e}")
+                    return
+
+        except Exception as ex:
+            logger.debug(f"Telemetry/context extraction skipped or failed: {ex}")
+
+        # Fallback path when OTEL not enabled or extraction failed
+        logger.info(f"Received submission {submission_id}. Asking AI...")
         try:
             score, feedback = await ask_llama(question, answer_text)
         except Exception as e:
@@ -193,6 +261,14 @@ async def startup_event():
             except Exception as e:
                 logger.info(f"Ollama check failed: {e}")
             await asyncio.sleep(5)
+
+    # If OpenTelemetry is available, instrument the FastAPI app now
+    try:
+        if _otel_enabled:
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+            FastAPIInstrumentor().instrument_app(app)
+    except Exception:
+        logger.debug("FastAPI instrumentation skipped")
 
     asyncio.create_task(model_watcher())
     asyncio.create_task(start_consumer())

@@ -19,11 +19,15 @@ services:
     container_name: quiz-service
     depends_on:
       - rabbitmq
+      - postgres
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
       - ASPNETCORE_ENVIRONMENT=Development
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=quiz-service
+      - ConnectionStrings__DefaultConnection=Host=postgres;Database=quizdb;Username=postgres;Password=postgres
     ports:
       - "5001:80"
     networks:
@@ -46,6 +50,8 @@ services:
       - RABBITMQ_PASSWORD=guest
       - OLLAMA_URL=http://ollama:11434
       - OLLAMA_MODEL=llama3:latest
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=ai-service
     ports:
       - "8001:8000"
     networks:
@@ -101,6 +107,8 @@ services:
       - quiz-service
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=api-gateway
     ports:
       - "7000:80"
     networks:
@@ -114,8 +122,35 @@ services:
       - api-gateway
     environment:
       - GATEWAY_URL=http://api-gateway
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=ui-service
     ports:
       - "5500:5500"
+    networks:
+      - med-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.46.0
+    container_name: jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP/gRPC
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    networks:
+      - med-net
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=quizdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     networks:
       - med-net
 
@@ -127,3 +162,5 @@ networks:
 volumes:
   ollama_data:
     name: ollama_data
+  postgres_data:
+    name: postgres_data
