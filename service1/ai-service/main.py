@@ -117,7 +117,7 @@ async def ask_llama(question: str, answer: str) -> tuple[int, str]:
     # ЛОГУВАННЯ СИРОЇ ВІДПОВІДІ (тепер піде і в файл)
     logger.info(f"Ollama raw response: {text}")
 
-    # Спроба розпарсити JSON
+    # Спроба розпарсити JSON з тексту
     try:
         json_match = re.search(r"\{.*\}", text, re.DOTALL)
         if json_match:
