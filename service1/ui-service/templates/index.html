@@ -55,7 +55,7 @@
               <div id="submissionsList" style="max-height:300px;overflow:auto">
                 <div class="text-muted">Loading...</div>
               </div>
-              <div class="mt-2"><small class="text-muted">Click an item to load details and open realtime updates.</small></div>
+              <div class="mt-2"><small class="text-muted">Click an item to load details (UI polls for updates).</small></div>
             </div>
           </div>
         </div>
@@ -90,8 +90,7 @@
     </div>
 
     <script>
-      // Simple EventSource (SSE) client to receive review updates from the API
-      let sse = null;
+      // Polling client to receive review updates from the API
       let pollTimer = null;
 
       function startPollFor(id) {
@@ -121,62 +120,11 @@
         if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         setRealtime('disconnected');
       }
-      function startSseFor(id) {
-        stopSse();
-        if (!id) return;
-        const url = `/api/quiz/events/${encodeURIComponent(id)}`;
-        try {
-          sse = new EventSource(url);
-        } catch (e) {
-          console.warn('EventSource construction failed', e);
-          return;
-        }
-        sse.onopen = function() {
-          // SSE connected, stop polling fallback
-          stopPoll();
-          setRealtime('sse');
-        };
-
-        sse.onmessage = function(evt) {
-          try {
-            const payload = JSON.parse(evt.data);
-            const pid = payload.id || payload.Id || payload.Id;
-            const score = payload.score ?? payload.Score ?? '-';
-            const status = payload.status ?? payload.Status ?? '-';
-            const feedback = payload.feedback ?? payload.Feedback ?? '-';
-
-            const lookupId = document.getElementById('lookupId').value.trim();
-            if (!lookupId || lookupId === String(pid)) {
-              document.getElementById('aiStatus').textContent = status;
-              document.getElementById('aiScore').textContent = String(score);
-              document.getElementById('aiFeedback').textContent = feedback;
-              try {
-                const current = JSON.parse(document.getElementById('resultArea').textContent || '{}');
-                if (current && (current.id === pid || current.Id === pid)) {
-                  current.score = score;
-                  current.status = status;
-                  current.feedback = feedback;
-                  document.getElementById('resultArea').textContent = JSON.stringify(current, null, 2);
-                }
-              } catch (_) {}
-            }
-          } catch (e) { console.warn('Invalid SSE payload', e); }
-        };
-        sse.onerror = function(evt) {
-          console.warn('SSE error', evt);
-          setRealtime('polling');
-          // start a polling fallback shortly after error
-          setTimeout(() => startPollFor(id), 2000);
-        };
-      }
 
       function setRealtime(mode) {
         const el = document.getElementById('realtimeIndicator');
         if (!el) return;
-        if (mode === 'sse') {
-          el.textContent = 'SSE';
-          el.className = 'badge bg-success';
-        } else if (mode === 'polling') {
+        if (mode === 'polling') {
           el.textContent = 'Polling';
           el.className = 'badge bg-warning text-dark';
         } else {
@@ -185,12 +133,7 @@
         }
       }
 
-      function stopSse() {
-        if (sse) {
-          try { sse.close(); } catch(_) {}
-          sse = null;
-        }
-      }
+      // SSE removed; UI uses polling-only
 
       // Fetch and render recent submissions into the left-side list
       async function refreshSubmissions() {
@@ -272,8 +215,8 @@
           const submittedId = (data && (data.id || data.Id || data.Id)) || null;
           if (submittedId) {
             document.getElementById('lookupId').value = submittedId;
-            // Start SSE stream for this submission id so UI receives reviews
-            try { startSseFor(submittedId); } catch(e) { console.warn('startSseFor failed', e); }
+            // Start polling for this submission id so UI receives reviews
+            try { startPollFor(submittedId); } catch(e) { console.warn('startPollFor failed', e); }
           }
           // clear any previous AI review fields (prefer server keys if returned)
           document.getElementById('aiStatus').textContent = data && (data.status || data.Status) ? (data.status || data.Status) : '-';
@@ -298,8 +241,8 @@
             document.getElementById('aiStatus').textContent = data.status || '-';
             document.getElementById('aiScore').textContent = (data.score !== undefined && data.score !== null) ? String(data.score) : '-';
             document.getElementById('aiFeedback').textContent = data.feedback || data.feedbackText || data.Feedback || '-';
-            // Start SSE stream for this submission id so UI receives future reviews
-            try { startSseFor(id); } catch(e) { console.warn('startSseFor failed', e); }
+            // Start polling for this submission id so UI receives future reviews
+            try { startPollFor(id); } catch(e) { console.warn('startPollFor failed', e); }
           } else {
             const text = await r.text();
             document.getElementById('resultArea').textContent = text;

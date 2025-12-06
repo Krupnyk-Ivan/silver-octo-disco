@@ -5,7 +5,7 @@ This repo is a minimal, containerized microservices example for a tactical-med q
 - `quiz-service` (C# .NET 8): stores submissions, publishes events to RabbitMQ via the RabbitMQ Management HTTP API.
 - `ai-service` (Python FastAPI): consumes RabbitMQ messages (aio-pika), asks Ollama for scoring, falls back to keyword scoring.
 - `api-gateway` (Ocelot): routes public paths under `/tactical/quiz/*` to `quiz-service`.
-- `ui-service` (FastAPI + Jinja): simple web UI; proxies SSE from the quiz service.
+  -- `ui-service` (FastAPI + Jinja): simple web UI; polls the gateway for submission state (`/api/list`, `/api/get/{id}`).
 - `rabbitmq`, `postgres`, `ollama`, `jaeger` are provided by `docker-compose.yml`.
 
 ## Quick start (what humans run)
@@ -15,18 +15,18 @@ This repo is a minimal, containerized microservices example for a tactical-med q
 ## Important files to inspect (use these as primary anchors)
 
 - `docker-compose.yml` — service names, ports, and env defaults used by CI/local runs.
-- `quiz-service/Controllers/QuizController.cs` — REST endpoints for submitting and retrieving quizzes; SSE endpoint at `/api/quiz/events/{id}`.
+  -- `quiz-service/Controllers/QuizController.cs` — REST endpoints for submitting and retrieving quizzes; UI polls `/api/quiz` and `/api/quiz/{id}`.
 - `quiz-service/Services/RabbitMqProducer.cs` — publishes events using RabbitMQ _management HTTP API_ (not RabbitMQ.Client). Any code changes that publish events must keep compatibility with this approach or change docker-compose accordingly.
 - `ai-service/main.py` — RabbitMQ consumer using `aio-pika`, `ask_llama()` logic, keyword fallback, model readiness watcher (`/api/tags`), and calls gateway review endpoint to post results.
 - `api-gateway/ocelot.json` — upstream → downstream route mapping (shows `UpstreamPathTemplate` and host/port targets used by gateway).
-- `ui-service/main.py` and `ui-service/templates/index.html` — simple UI and SSE proxying logic.
+  -- `ui-service/main.py` and `ui-service/templates/index.html` — simple UI that polls the gateway for lists and submission details.
 
 ## Architecture and data flow (concise)
 
 1. Client (UI or direct) POSTs to `api-gateway` → `/tactical/quiz/submit`.
 2. `api-gateway` forwards to `quiz-service` `/api/quiz/submit` which: persists to Postgres, then publishes an event to exchange `med_events` with routing key `submission.created`.
 3. `ai-service` consumes messages bound to `med_events` / `submission.created` (queue `ai_review_queue`), scores the answer (calls Ollama at `OLLAMA_URL`), and posts review back to `GATEWAY_URL/tactical/quiz/{id}/review`.
-4. `quiz-service` receives review POST, updates DB, and pushes real-time updates to SSE subscribers via `SseService` (subscribed by browser via UI proxy).
+4. `quiz-service` receives review POST and updates DB. The UI polls the gateway for updates; SSE support removed.
 
 Key message fields (observed): `Id`, `StudentId`, `Question`, `AnswerText`, `Status`.
 
@@ -36,7 +36,7 @@ Key message fields (observed): `Id`, `StudentId`, `Question`, `AnswerText`, `Sta
   - Tests or local stubs must mimic the management API semantics or provide a real RabbitMQ management endpoint on port `15672`.
   - Publishing uses `payload` string encoded JSON in the management POST; don't replace this with binary framing unless you also update consumer expectations.
 - `ai-service` expects the Ollama model to be present and checks `/api/tags`; `docker-compose` runs an `ollama-init` helper that pulls the model. When modifying AI call behavior, keep the `MODEL_READY` watcher and the error fallback in mind.
-- Real-time updates use SSE on `quiz-service` and are proxied by `ui-service`. Agents changing the SSE payload shape must update `QuizController.Review` and `ui-service` proxy logic.
+  -- Real-time updates previously used SSE; the project now relies on client polling. When changing the submission payload, update `QuizController.Review`, `api-gateway/ocelot.json`, and `ui-service` polling endpoints (`/api/list`, `/api/get/{id}`).
 - Telemetry (OpenTelemetry) is optional and guarded with try/except in both Python and C# code. Instrumentation may be present but is safe to skip in dev environments.
 - Database: the code uses Npgsql/Postgres by default (`QuizDbContext` + connection string from `ConnectionStrings__DefaultConnection`). A README comment incorrectly mentions EF InMemory; rely on `quiz-service/Program.cs` for the truth.
 
@@ -48,7 +48,7 @@ Key message fields (observed): `Id`, `StudentId`, `Question`, `AnswerText`, `Sta
 
 ## When editing messaging or schema
 
-- Update both sides (producer and consumer): `quiz-service/Controllers/QuizController.cs` (payload shape) and `ai-service/main.py` (consumer field lookup). Also update any test fixtures and `ui-service` SSE handlers.
+- Update both sides (producer and consumer): `quiz-service/Controllers/QuizController.cs` (payload shape) and `ai-service/main.py` (consumer field lookup). Also update any test fixtures and `ui-service` handlers.
 - Update `ocelot.json` routes if you rename upstream paths.
 
 ## Small, actionable examples for agents

@@ -50,19 +50,7 @@
       "UpstreamPathTemplate": "/tactical/quiz",
       "UpstreamHttpMethod": [ "GET" ]
     }
-    ,
-    {
-      "DownstreamPathTemplate": "/api/quiz/events/{id}",
-      "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [
-        {
-          "Host": "quiz-service",
-          "Port": 80
-        }
-      ],
-      "UpstreamPathTemplate": "/api/quiz/events/{id}",
-      "UpstreamHttpMethod": [ "GET" ]
-    }
+    
   ],
   "GlobalConfiguration": {
     "RequestIdKey": "RequestId",

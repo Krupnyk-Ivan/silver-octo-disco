@@ -16,14 +16,12 @@ namespace QuizService.Controllers
         private readonly QuizDbContext _db;
         private readonly RabbitMqProducer _producer;
         private readonly ILogger<QuizController> _logger;
-        private readonly SseService _sse;
 
-        public QuizController(QuizDbContext db, RabbitMqProducer producer, ILogger<QuizController> logger, SseService sse)
+        public QuizController(QuizDbContext db, RabbitMqProducer producer, ILogger<QuizController> logger)
         {
             _db = db;
             _producer = producer;
             _logger = logger;
-            _sse = sse;
         }
 
         public class SubmitDto
@@ -66,7 +64,7 @@ namespace QuizService.Controllers
                 _logger.LogError(ex, "Failed publishing submission.created event");
             }
 
-            // No SignalR action here - clients will connect via SSE to receive review messages for a submission id
+            // No SignalR/SSE action here - UI polls for updates via `/api/quiz/{id}`
 
             return CreatedAtAction(nameof(Get), new { id = submission.Id }, submission);
         }
@@ -108,50 +106,11 @@ namespace QuizService.Controllers
             if (!string.IsNullOrEmpty(dto.Feedback)) s.Feedback = dto.Feedback;
 
             await _db.SaveChangesAsync();
-            // Publish real-time update to SSE subscribers for this submission id
-            try
-            {
-                var payload = System.Text.Json.JsonSerializer.Serialize(new {
-                    Id = s.Id,
-                    Score = s.Score,
-                    Status = s.Status,
-                    Feedback = s.Feedback
-                });
-                await _sse.PublishAsync(id.ToString(), payload);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to publish SSE review message");
-            }
+            // Real-time updates via SSE removed; UI polls for updates.
 
             return Ok(s);
         }
 
-        [HttpGet("events/{id:guid}")]
-        public async Task Events(Guid id)
-        {
-            Response.Headers.Add("Cache-Control", "no-cache");
-            Response.Headers.Add("X-Accel-Buffering", "no");
-            Response.ContentType = "text/event-stream";
-
-            var reader = _sse.Subscribe(id.ToString());
-            try
-            {
-                while (await reader.WaitToReadAsync(HttpContext.RequestAborted))
-                {
-                    while (reader.TryRead(out var message))
-                    {
-                        var sseData = $"data: {message}\n\n";
-                        await Response.WriteAsync(sseData, HttpContext.RequestAborted);
-                        await Response.Body.FlushAsync(HttpContext.RequestAborted);
-                    }
-                }
-            }
-            catch (OperationCanceledException) { }
-            finally
-            {
-                _sse.Unsubscribe(id.ToString(), reader);
-            }
-        }
+        // SSE endpoint removed; clients should poll `/api/quiz/{id}` instead.
     }
 }

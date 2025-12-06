@@ -12,8 +12,7 @@ builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-// SSE service for real-time updates
-builder.Services.AddSingleton<QuizService.Services.SseService>();
+// SSE support removed; UI uses polling via the gateway
 // Allow CORS so the UI (different origin/port) can connect for realtime updates
 builder.Services.AddCors(options =>
 {
@@ -90,7 +89,7 @@ catch (Exception ex)
 
 var app = builder.Build();
 
-// Realtime endpoints (SSE) are available at /api/quiz/events/{id}
+// SSE removed; UI polls the gateway for updates
 app.UseCors();
 
 // Ensure DB created on startup
