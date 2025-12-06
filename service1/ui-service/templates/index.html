@@ -48,6 +48,16 @@
               </div>
             </div>
           </div>
+          
+          <div class="card mt-3">
+            <div class="card-body">
+              <h5 class="card-title">Recent Submissions</h5>
+              <div id="submissionsList" style="max-height:300px;overflow:auto">
+                <div class="text-muted">Loading...</div>
+              </div>
+              <div class="mt-2"><small class="text-muted">Click an item to load details and open realtime updates.</small></div>
+            </div>
+          </div>
         </div>
 
         <div class="col-md-5">
@@ -182,6 +192,59 @@
         }
       }
 
+      // Fetch and render recent submissions into the left-side list
+      async function refreshSubmissions() {
+        const container = document.getElementById('submissionsList');
+        if (!container) return;
+        container.innerHTML = '<div class="text-muted">Loading...</div>';
+        try {
+          const r = await fetch('/api/list');
+          if (r.status !== 200) {
+            container.innerHTML = '<div class="text-danger">Failed to load</div>';
+            return;
+          }
+          const data = await r.json();
+          if (!Array.isArray(data) || data.length === 0) {
+            container.innerHTML = '<div class="text-muted">No submissions yet.</div>';
+            return;
+          }
+          // Render clickable list
+          container.innerHTML = '';
+          data.forEach(item => {
+            const id = item.id || item.Id || item.Id;
+            const student = item.studentId || item.StudentId || '-';
+            const q = item.question || item.Question || '-';
+            const status = item.status || item.Status || '-';
+
+            const el = document.createElement('div');
+            el.className = 'p-2 border-bottom';
+            el.style.cursor = 'pointer';
+            el.innerHTML = `
+              <div class="d-flex justify-content-between">
+                <div><strong>${student}</strong></div>
+                <div><small class="text-muted">${status}</small></div>
+              </div>
+              <div><small>${q}</small></div>
+              <div><small class="text-break text-muted">${id}</small></div>
+            `;
+            el.addEventListener('click', () => {
+              if (!id) return;
+              document.getElementById('lookupId').value = id;
+              document.getElementById('lookupBtn').click();
+              // scroll to result area for convenience
+              document.getElementById('resultArea').scrollIntoView({ behavior: 'smooth' });
+            });
+            container.appendChild(el);
+          });
+        } catch (e) {
+          container.innerHTML = '<div class="text-danger">Error loading list</div>';
+        }
+      }
+
+      // Refresh submissions on load and periodically
+      try { refreshSubmissions(); } catch(_) {}
+      setInterval(refreshSubmissions, 10000);
+
       async function postJson(path, body) {
         const resp = await fetch(path, {
           method: 'POST',
@@ -205,14 +268,17 @@
           const data = await r.json();
           statusEl.textContent = r.ok ? 'Submitted' : 'Error';
           document.getElementById('resultArea').textContent = JSON.stringify(data, null, 2);
-          if (data && data.id) {
-            document.getElementById('lookupId').value = data.id;
+          // Accept either `id` or `Id` depending on server JSON casing
+          const submittedId = (data && (data.id || data.Id || data.Id)) || null;
+          if (submittedId) {
+            document.getElementById('lookupId').value = submittedId;
             // Start SSE stream for this submission id so UI receives reviews
-            try { startSseFor(data.id); } catch(e) { console.warn('startSseFor failed', e); }
+            try { startSseFor(submittedId); } catch(e) { console.warn('startSseFor failed', e); }
           }
-          // clear any previous AI review
-          document.getElementById('aiStatus').textContent = '-';
-          document.getElementById('aiScore').textContent = '-';
+          // clear any previous AI review fields (prefer server keys if returned)
+          document.getElementById('aiStatus').textContent = data && (data.status || data.Status) ? (data.status || data.Status) : '-';
+          document.getElementById('aiScore').textContent = data && (data.score !== undefined && data.score !== null) ? String(data.score ?? data.Score ?? '-') : '-';
+          document.getElementById('aiFeedback').textContent = data && (data.feedback || data.Feedback || data.feedbackText) ? (data.feedback || data.Feedback || data.feedbackText) : '-';
         } catch (err) {
           statusEl.textContent = 'Network error';
           document.getElementById('resultArea').textContent = String(err);

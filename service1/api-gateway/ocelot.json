@@ -39,6 +39,19 @@
     }
     ,
     {
+      "DownstreamPathTemplate": "/api/quiz",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [
+        {
+          "Host": "quiz-service",
+          "Port": 80
+        }
+      ],
+      "UpstreamPathTemplate": "/tactical/quiz",
+      "UpstreamHttpMethod": [ "GET" ]
+    }
+    ,
+    {
       "DownstreamPathTemplate": "/api/quiz/events/{id}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [

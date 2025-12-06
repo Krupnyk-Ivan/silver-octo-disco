@@ -5,6 +5,7 @@ using QuizService.Services;
 using QuizService.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 
 namespace QuizService.Controllers
 {
@@ -76,6 +77,17 @@ namespace QuizService.Controllers
             var s = await _db.QuizSubmissions.FirstOrDefaultAsync(x => x.Id == id);
             if (s == null) return NotFound();
             return Ok(s);
+        }
+
+        // GET /api/quiz
+        // Returns all submissions. Useful for listing recent questions in the UI.
+        [HttpGet]
+        public async Task<IActionResult> List()
+        {
+            var list = await _db.QuizSubmissions
+                .OrderByDescending(x => x.Id)
+                .ToListAsync();
+            return Ok(list);
         }
 
         public class ReviewDto

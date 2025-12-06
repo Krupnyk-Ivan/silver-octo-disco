@@ -58,6 +58,22 @@ async def api_get(submission_id: str):
     return JSONResponse(status_code=resp.status_code, content=data)
 
 
+@app.get("/api/list")
+async def api_list():
+    # Proxy endpoint: GET list of submissions from the API gateway
+    async with httpx.AsyncClient() as client:
+        try:
+            url = f"{GATEWAY}/tactical/quiz"
+            resp = await client.get(url, timeout=10.0)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"status_code": resp.status_code, "text": resp.text}
+    return JSONResponse(status_code=resp.status_code, content=data)
+
+
 @app.get("/api/quiz/events/{submission_id}")
 async def proxy_events(submission_id: str):
     # Proxy SSE from the API gateway (which forwards to quiz-service) to the browser.
@@ -66,18 +82,43 @@ async def proxy_events(submission_id: str):
         try:
             # Use stream to forward chunks as they arrive
             async with client.stream("GET", url) as resp:
+                print(f"[ui-service] proxy_events: connected to {url} status={resp.status_code}")
                 async def event_generator():
+                    # Buffer incoming text and yield only complete SSE events (separated by '\n\n')
+                    buf = ""
                     try:
-                        async for chunk in resp.aiter_bytes():
-                            # If upstream closed the stream, aiter_bytes will raise StreamClosed
-                            yield chunk
+                        async for chunk in resp.aiter_text():
+                            if not chunk:
+                                continue
+                            # Debug: log chunk size
+                            try:
+                                print(f"[ui-service] proxy_events: received chunk len={len(chunk)}")
+                            except Exception:
+                                pass
+                            buf += chunk
+                            while "\n\n" in buf:
+                                idx = buf.index("\n\n")
+                                event = buf[:idx+2]
+                                # Yield complete event as string (StreamingResponse will encode)
+                                # Debug: log complete event length
+                                try:
+                                    print(f"[ui-service] proxy_events: yielding event len={len(event)}")
+                                except Exception:
+                                    pass
+                                yield event
+                                buf = buf[idx+2:]
+                        # If stream ends and buffer has remaining data, yield it
+                        if buf:
+                            try:
+                                print(f"[ui-service] proxy_events: yielding final buf len={len(buf)}")
+                            except Exception:
+                                pass
+                            yield buf
                     except httpx.StreamClosed:
-                        # Upstream closed the stream (e.g. gateway timeout). End cleanly.
                         return
                     except httpx.ReadError:
                         return
                     except Exception:
-                        # On unexpected errors, stop the generator quietly so FastAPI can finish the response
                         return
 
                 # Mirror the upstream content-type if provided, otherwise use text/event-stream
