@@ -12,6 +12,19 @@ builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+// SSE service for real-time updates
+builder.Services.AddSingleton<QuizService.Services.SseService>();
+// Allow CORS so the UI (different origin/port) can connect for realtime updates
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.SetIsOriginAllowed(_ => true)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
 
 // Configure Postgres connection (fallback to a sensible default for docker-compose)
 var defaultConn = "Host=postgres;Database=quizdb;Username=postgres;Password=postgres";
@@ -76,6 +89,9 @@ catch (Exception ex)
 }
 
 var app = builder.Build();
+
+// Realtime endpoints (SSE) are available at /api/quiz/events/{id}
+app.UseCors();
 
 // Ensure DB created on startup
 using (var scope = app.Services.CreateScope())

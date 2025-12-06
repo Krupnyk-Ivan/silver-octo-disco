@@ -1,6 +1,6 @@
 import os
 from fastapi import FastAPI, Request, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 import httpx
 
@@ -56,3 +56,32 @@ async def api_get(submission_id: str):
     except Exception:
         data = {"status_code": resp.status_code, "text": resp.text}
     return JSONResponse(status_code=resp.status_code, content=data)
+
+
+@app.get("/api/quiz/events/{submission_id}")
+async def proxy_events(submission_id: str):
+    # Proxy SSE from the API gateway (which forwards to quiz-service) to the browser.
+    url = f"{GATEWAY}/api/quiz/events/{submission_id}"
+    async with httpx.AsyncClient(timeout=None) as client:
+        try:
+            # Use stream to forward chunks as they arrive
+            async with client.stream("GET", url) as resp:
+                async def event_generator():
+                    try:
+                        async for chunk in resp.aiter_bytes():
+                            # If upstream closed the stream, aiter_bytes will raise StreamClosed
+                            yield chunk
+                    except httpx.StreamClosed:
+                        # Upstream closed the stream (e.g. gateway timeout). End cleanly.
+                        return
+                    except httpx.ReadError:
+                        return
+                    except Exception:
+                        # On unexpected errors, stop the generator quietly so FastAPI can finish the response
+                        return
+
+                # Mirror the upstream content-type if provided, otherwise use text/event-stream
+                content_type = resp.headers.get('content-type', 'text/event-stream')
+                return StreamingResponse(event_generator(), media_type=content_type)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
