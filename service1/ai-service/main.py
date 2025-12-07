@@ -73,17 +73,32 @@ def keyword_score(answer_text: str) -> int:
         return 100
     return 0
 
-async def ask_llama(question: str, answer: str) -> tuple[int, str]:
-    """Відправляє запит до Ollama і намагається розпарсити результат."""
+from typing import Optional
+
+
+async def ask_llama(question: str, answer: str, raw_prompt: Optional[str] = None) -> tuple[int, str]:
+    """Відправляє запит до Ollama і намагається розпарсити результат.
+
+    Якщо `raw_prompt` наданий, використовуємо його як повний промт для моделі.
+    """
     if not MODEL_READY:
         raise RuntimeError("Ollama model not ready")
-    
-    prompt = (
-        "You are a medical instructor. Evaluate the student's answer to the question below and return a JSON object"
-        " with two keys: \"score\" (an integer 0-100) and \"feedback\" (a short helpful sentence)."
-        " Output must be valid JSON only."
-        f"\n\nQuestion: {question}\n\nStudent Answer: {answer}\n\n"
-    )
+
+    if raw_prompt:
+        prompt = raw_prompt
+    else:
+        # Український структурований промт: повернути єдиний валідний JSON з полями
+        prompt = (
+            "Ви — інструктор з надання першої допомоги. Оцініть відповідь студента на наведене нижче питання "
+            "і ПОВЕРНІТЬ ОДИН ВАЛІДНИЙ JSON-ОБ'ЄКТ (без додаткового тексту) з полями:\n"
+            "  - \"score\": ціле число від 0 до 100 (100 = ідеальна відповідь)\n"
+            "  - \"feedback\": коротке, корисне речення для студента\n"
+            "  - \"reasoning\": 1–2 речення з поясненням, чому така оцінка\n"
+            "  - \"suggested_prompt\": (необов'язково) коротка покращена підказка для подальшої оцінки\n"
+            "Базуйте оцінку на загальноприйнятих правилах першої допомоги; будьте лаконічні, конкретні і уникайте непотрібних деталей. "
+            "Поверніть виключно коректний JSON — жодного вільного тексту до або після об'єкта і українською.\n\n"
+            f"Питання: {question}\n\nВідповідь студента: {answer}\n\n"
+        )
 
     payload = {
         "model": OLLAMA_MODEL,
@@ -182,7 +197,11 @@ async def process_message(message: aio_pika.IncomingMessage):
                     logger.info(f"Received submission {submission_id}. Asking AI...")
 
                     try:
-                        score, feedback = await ask_llama(question, answer_text)
+                        attempt_prompt = payload.get("AttemptPrompt") or payload.get("attemptPrompt") or payload.get("Prompt") or payload.get("prompt")
+                        if attempt_prompt:
+                            score, feedback = await ask_llama(question, answer_text, raw_prompt=attempt_prompt)
+                        else:
+                            score, feedback = await ask_llama(question, answer_text)
                     except Exception as e:
                         logger.warning(f"Ollama failed, using keywords. Error: {e}")
                         score = keyword_score(answer_text)
@@ -205,7 +224,11 @@ async def process_message(message: aio_pika.IncomingMessage):
         # Fallback path when OTEL not enabled or extraction failed
         logger.info(f"Received submission {submission_id}. Asking AI...")
         try:
-            score, feedback = await ask_llama(question, answer_text)
+            attempt_prompt = payload.get("AttemptPrompt") or payload.get("attemptPrompt") or payload.get("Prompt") or payload.get("prompt")
+            if attempt_prompt:
+                score, feedback = await ask_llama(question, answer_text, raw_prompt=attempt_prompt)
+            else:
+                score, feedback = await ask_llama(question, answer_text)
         except Exception as e:
             logger.warning(f"Ollama failed, using keywords. Error: {e}")
             score = keyword_score(answer_text)

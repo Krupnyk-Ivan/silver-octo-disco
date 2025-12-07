@@ -15,6 +15,11 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "gateway": GATEWAY})
 
 
+@app.get("/quiz", response_class=HTMLResponse)
+async def quiz_page(request: Request):
+    return templates.TemplateResponse("quiz.html", {"request": request, "gateway": GATEWAY})
+
+
 @app.post("/submit")
 async def submit(studentId: str = Form(...), question: str = Form(...), answerText: str = Form(...)):
     # Keep the original form POST behavior for non-JS fallback
@@ -64,6 +69,70 @@ async def api_list():
     async with httpx.AsyncClient() as client:
         try:
             url = f"{GATEWAY}/tactical/quiz"
+            resp = await client.get(url, timeout=10.0)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"status_code": resp.status_code, "text": resp.text}
+    return JSONResponse(status_code=resp.status_code, content=data)
+
+
+@app.get("/api/questions")
+async def api_questions():
+    # Proxy to quiz-service questions endpoint
+    async with httpx.AsyncClient() as client:
+        try:
+            url = f"http://quiz-service/api/questions"
+            resp = await client.get(url, timeout=10.0)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"status_code": resp.status_code, "text": resp.text}
+    return JSONResponse(status_code=resp.status_code, content=data)
+
+
+@app.get("/api/questions/random/{count}")
+async def api_questions_random(count: int):
+    # Proxy to quiz-service random questions endpoint
+    async with httpx.AsyncClient() as client:
+        try:
+            url = f"http://quiz-service/api/questions/random/{count}"
+            resp = await client.get(url, timeout=10.0)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"status_code": resp.status_code, "text": resp.text}
+    return JSONResponse(status_code=resp.status_code, content=data)
+
+
+@app.post("/api/questions")
+async def api_create_question(body: dict):
+    # Proxy POST to quiz-service to create a Question
+    async with httpx.AsyncClient() as client:
+        try:
+            url = f"http://quiz-service/api/questions"
+            resp = await client.post(url, json=body, timeout=10.0)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"status_code": resp.status_code, "text": resp.text}
+    return JSONResponse(status_code=resp.status_code, content=data)
+
+
+@app.get("/api/knowledge")
+async def api_knowledge():
+    # Proxy to quiz-service knowledge endpoint
+    async with httpx.AsyncClient() as client:
+        try:
+            url = f"http://quiz-service/api/knowledge"
             resp = await client.get(url, timeout=10.0)
         except httpx.RequestError as exc:
             raise HTTPException(status_code=503, detail=str(exc))

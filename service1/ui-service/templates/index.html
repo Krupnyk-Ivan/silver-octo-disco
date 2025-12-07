@@ -10,8 +10,8 @@
     <div class="container py-4">
       <div class="row mb-4">
         <div class="col">
-          <h1 class="h3">TacticalMed — Student UI</h1>
-          <p class="text-muted">Submit answers and view review results (mock AI scoring).</p>
+          <h1 class="h3">TacticalMed — Інтерфейс студента</h1>
+          <p class="text-muted">Надішліть відповіді та переглядайте результати оцінювання (штучний інтелект).</p>
         </div>
       </div>
 
@@ -19,21 +19,30 @@
         <div class="col-md-7">
           <div class="card mb-3">
             <div class="card-body">
-              <h5 class="card-title">Submit Answer</h5>
+              <h5 class="card-title">Надіслати відповідь</h5>
+              <div class="mb-2 text-end">
+                <a href="/quiz" class="btn btn-sm btn-outline-primary">Розпочати тест (5 запитань)</a>
+              </div>
               <form id="submitForm">
                 <div class="mb-2">
-                  <label class="form-label">Student ID</label>
+                  <label class="form-label">ID студента</label>
                   <input class="form-control" name="studentId" id="studentId" value="student1" required />
                 </div>
                 <div class="mb-2">
-                  <label class="form-label">Question</label>
-                  <input class="form-control" name="question" id="question" value="What is the first step for massive hemorrhage?" required />
+                  <label class="form-label">Питання</label>
+                  <div class="d-flex gap-2">
+                    <select id="questionSelect" class="form-select" aria-label="Choose question">
+                      <option value="__custom__">-- Custom / type your own --</option>
+                    </select>
+                    <button id="refreshQuestions" type="button" class="btn btn-outline-secondary">Refresh</button>
+                  </div>
+                  <input class="form-control mt-2" name="question" id="question" placeholder="Введіть власне питання або оберіть зі списку" required />
                 </div>
                 <div class="mb-3">
-                  <label class="form-label">Answer</label>
-                  <textarea class="form-control" name="answerText" id="answerText" rows="4">Apply a tourniquet and direct pressure</textarea>
+                  <label class="form-label">Відповідь</label>
+                  <textarea class="form-control" name="answerText" id="answerText" rows="4">Застосувати джгут та прямий тиск</textarea>
                 </div>
-                <button class="btn btn-primary" type="submit">Submit</button>
+                <button class="btn btn-primary" type="submit">Надіслати</button>
                 <span id="submitStatus" class="ms-3"></span>
               </form>
             </div>
@@ -41,21 +50,21 @@
 
           <div class="card">
             <div class="card-body">
-              <h5 class="card-title">Lookup Submission</h5>
+              <h5 class="card-title">Пошук надсилання</h5>
               <div class="input-group">
-                <input id="lookupId" class="form-control" placeholder="Submission id (GUID)" />
-                <button id="lookupBtn" class="btn btn-outline-secondary">Lookup</button>
+                <input id="lookupId" class="form-control" placeholder="ID надсилання (GUID)" />
+                <button id="lookupBtn" class="btn btn-outline-secondary">Пошук</button>
               </div>
             </div>
           </div>
           
           <div class="card mt-3">
             <div class="card-body">
-              <h5 class="card-title">Recent Submissions</h5>
+              <h5 class="card-title">Останні надсилання</h5>
               <div id="submissionsList" style="max-height:300px;overflow:auto">
                 <div class="text-muted">Loading...</div>
               </div>
-              <div class="mt-2"><small class="text-muted">Click an item to load details (UI polls for updates).</small></div>
+              <div class="mt-2"><small class="text-muted">Клацніть елемент, щоб переглянути деталі (інтерфейс опитує сервер).</small></div>
             </div>
           </div>
         </div>
@@ -63,21 +72,21 @@
         <div class="col-md-5">
           <div class="card mb-3">
             <div class="card-body">
-              <h5 class="card-title">Result</h5>
-              <pre id="resultArea" style="white-space:pre-wrap;word-break:break-word;">No results yet.</pre>
+              <h5 class="card-title">Результат</h5>
+              <pre id="resultArea" style="white-space:pre-wrap;word-break:break-word;">Поки що немає результатів.</pre>
             </div>
           </div>
 
           <div class="card">
             <div class="card-body">
-              <h5 class="card-title">AI Review</h5>
+              <h5 class="card-title">Огляд AI</h5>
               <div class="mb-2">
-                <small>Realtime status: <span id="realtimeIndicator" class="badge bg-secondary">Disconnected</span></small>
+                <small>Статус: <span id="realtimeIndicator" class="badge bg-secondary">Відключено</span></small>
               </div>
               <div id="aiReview">
-                <div><strong>Status:</strong> <span id="aiStatus">-</span></div>
-                <div><strong>Score:</strong> <span id="aiScore">-</span></div>
-                <div class="mt-2"><strong>Feedback:</strong>
+                <div><strong>Статус:</strong> <span id="aiStatus">-</span></div>
+                <div><strong>Оцінка:</strong> <span id="aiScore">-</span></div>
+                <div class="mt-2"><strong>Коментар:</strong>
                   <div id="aiFeedback" style="white-space:pre-wrap;word-break:break-word;">-</div>
                 </div>
               </div>
@@ -86,10 +95,56 @@
         </div>
       </div>
 
-      <footer class="mt-4 text-muted">Gateway: {{ gateway }} — RabbitMQ-backed review flow</footer>
+      <footer class="mt-4 text-muted">Шлюз: {{ gateway }} — потік перевірки через RabbitMQ</footer>
     </div>
 
     <script>
+      // Load questions from server and populate select
+      async function loadQuestions() {
+        const sel = document.getElementById('questionSelect');
+        if (!sel) return;
+        sel.innerHTML = '<option value="__custom__">-- Custom / type your own --</option>';
+        try {
+          const r = await fetch('/api/questions');
+          if (r.status !== 200) return;
+          const data = await r.json();
+          if (!Array.isArray(data)) return;
+          data.forEach(q => {
+            const id = q.id || q.Id || q.Id;
+            const title = q.title || q.Title || (q.text || q.Text || '').slice(0,60);
+            const opt = document.createElement('option');
+            opt.value = id || (q.text || q.Text || '');
+            opt.textContent = title;
+            // Attach full text for use when selected
+            opt.dataset.full = q.text || q.Text || '';
+            sel.appendChild(opt);
+          });
+        } catch (e) {
+          console.warn('loadQuestions failed', e);
+        }
+      }
+
+      document.getElementById('refreshQuestions').addEventListener('click', () => loadQuestions());
+
+      document.getElementById('questionSelect').addEventListener('change', (e) => {
+        const v = e.target.value;
+        const input = document.getElementById('question');
+        const opt = e.target.selectedOptions && e.target.selectedOptions[0];
+        if (!input) return;
+        if (v === '__custom__') {
+          input.removeAttribute('readonly');
+          input.value = '';
+          input.focus();
+        } else {
+          // if the option has dataset.full use it, otherwise use value
+          input.value = opt && opt.dataset && opt.dataset.full ? opt.dataset.full : v;
+          input.setAttribute('readonly', 'true');
+        }
+      });
+
+      // Load questions on initial page load
+      try { loadQuestions(); } catch(_) {}
+
       // Polling client to receive review updates from the API
       let pollTimer = null;
 
@@ -199,10 +254,49 @@
 
       document.getElementById('submitForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const studentId = document.getElementById('studentId').value;
+        const answerText = document.getElementById('answerText').value;
+        const questionInput = document.getElementById('question');
+        const questionSelect = document.getElementById('questionSelect');
+
+        // Determine question text. If user chose custom, create the question in DB first
+        let questionText = questionInput.value || '';
+        if (questionSelect && questionSelect.value === '__custom__') {
+          // create question record via UI proxy
+          try {
+            const title = questionText ? (questionText.substring(0, 60)) : 'Custom question';
+            const createResp = await postJson('/api/questions', { Title: title, Text: questionText });
+            if (createResp && createResp.ok) {
+              const created = await createResp.json();
+              // use returned text if available
+              questionText = created.text || created.Text || questionText;
+              // add to select for convenience
+              try {
+                const opt = document.createElement('option');
+                opt.value = created.id || created.Id || '';
+                opt.textContent = created.title || created.Title || (questionText.substring(0,60));
+                opt.dataset.full = questionText;
+                // insert after the custom option
+                questionSelect.appendChild(opt);
+                questionSelect.value = opt.value || opt.textContent;
+                questionInput.setAttribute('readonly','true');
+              } catch (e) { console.warn('Adding created option failed', e); }
+            } else {
+              // creation failed; continue but still submit the text as-is
+              console.warn('Question creation returned non-OK');
+            }
+          } catch (err) {
+            console.warn('Failed creating question', err);
+          }
+        } else if (questionSelect && questionSelect.value && questionSelect.value !== '__custom__') {
+          const opt = questionSelect.selectedOptions && questionSelect.selectedOptions[0];
+          questionText = opt && opt.dataset && opt.dataset.full ? opt.dataset.full : questionText;
+        }
+
         const payload = {
-          StudentId: document.getElementById('studentId').value,
-          Question: document.getElementById('question').value,
-          AnswerText: document.getElementById('answerText').value
+          StudentId: studentId,
+          Question: questionText,
+          AnswerText: answerText
         };
         const statusEl = document.getElementById('submitStatus');
         statusEl.textContent = 'Submitting...';
